@@ -10,16 +10,17 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 STATIC = Path(__file__).resolve().parent / "static"
-UA = "Farmland/0.5 (github.com/eugene-ehlers/farmland-src)"
-# ~110 m / ~1 ha at mid-RSA latitudes.
+UA = "Farmland/0.6 (github.com/eugene-ehlers/farmland-src)"
 STEP = 0.001
 ORIGIN_W, ORIGIN_S = 11.50, -35.80
 ORIGIN_E, ORIGIN_N = 36.20, -15.40
+MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+CLIMATE_CACHE: dict[str, dict] = {}
 
-app = FastAPI(title="Farmland", version="0.5.0")
+app = FastAPI(title="Farmland", version="0.6.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 
-def get_json(url, timeout=12):
+def get_json(url, timeout=40):
     req = Request(url, headers={"User-Agent": UA})
     with urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode())
@@ -46,7 +47,8 @@ def parse_id(pid: str):
 
 def cell_feature(ix, iy):
     w, s, e, n = cell_bounds(ix, iy)
-    mid_lat = (s + n) / 2
+    mid_lat = (s + n) / 2.0
+    mid_lon = (w + e) / 2.0
     ha = round(abs((e - w) * 111_320.0 * math.cos(math.radians(mid_lat)) * (n - s) * 110_540.0) / 10_000.0, 2)
     pid = cell_id(ix, iy)
     return {
@@ -60,9 +62,71 @@ def cell_feature(ix, iy):
             "extent_ha": ha,
             "kind": "grid",
             "step_deg": STEP,
+            "centroid": [round(mid_lon, 5), round(mid_lat, 5)],
             "source": "Coordinate grid (~1 ha). Not a cadastral farm portion.",
         },
     }
+
+def _avg(xs):
+    xs = [x for x in xs if x is not None]
+    return round(sum(xs) / len(xs), 2) if xs else None
+
+def climate_for(lat: float, lon: float) -> dict:
+    key = f"{lat:.4f},{lon:.4f}"
+    if key in CLIMATE_CACHE:
+        return CLIMATE_CACHE[key]
+    params = {
+        "latitude": f"{lat:.4f}",
+        "longitude": f"{lon:.4f}",
+        "start_date": "2015-01-01",
+        "end_date": "2024-12-31",
+        "daily": "temperature_2m_mean,temperature_2m_max,temperature_2m_min,precipitation_sum,relative_humidity_2m_mean,shortwave_radiation_sum",
+        "timezone": "Africa/Johannesburg",
+    }
+    data = get_json("https://archive-api.open-meteo.com/v1/archive?" + urlencode(params))
+    daily = data.get("daily") or {}
+    times = daily.get("time") or []
+    buckets = {m: {"t": [], "tx": [], "tn": [], "p": [], "h": [], "s": []} for m in range(1, 13)}
+    for i, day in enumerate(times):
+        m = int(day[5:7])
+        b = buckets[m]
+        if daily.get("temperature_2m_mean"): b["t"].append(daily["temperature_2m_mean"][i])
+        if daily.get("temperature_2m_max"): b["tx"].append(daily["temperature_2m_max"][i])
+        if daily.get("temperature_2m_min"): b["tn"].append(daily["temperature_2m_min"][i])
+        if daily.get("precipitation_sum"): b["p"].append(daily["precipitation_sum"][i])
+        if daily.get("relative_humidity_2m_mean"): b["h"].append(daily["relative_humidity_2m_mean"][i])
+        if daily.get("shortwave_radiation_sum"): b["s"].append(daily["shortwave_radiation_sum"][i])
+    monthly = []
+    rain_year = 0.0
+    for m in range(1, 13):
+        b = buckets[m]
+        # mean daily rain * days in a 10-year month stack / 10 years ≈ monthly total
+        rain_days = [x for x in b["p"] if x is not None]
+        monthly_rain = round(sum(rain_days) / 10.0, 1) if rain_days else None
+        if monthly_rain is not None:
+            rain_year += monthly_rain
+        monthly.append({
+            "month": MONTHS[m - 1],
+            "rain_mm": monthly_rain,
+            "t_mean_c": _avg(b["t"]),
+            "t_max_c": _avg(b["tx"]),
+            "t_min_c": _avg(b["tn"]),
+            "rh_pct": _avg(b["h"]),
+            "sun_mj_m2": _avg(b["s"]),
+        })
+    out = {
+        "period": "2015-01-01 to 2024-12-31",
+        "source": "Open-Meteo archive (ERA5 / ERA5-Land reanalysis). Not a SAWS station record.",
+        "scale": "~9-25 km native grid, sampled at cell centroid",
+        "confidence": "indicative historic climate",
+        "latitude": data.get("latitude"),
+        "longitude": data.get("longitude"),
+        "elevation_m": data.get("elevation"),
+        "annual_rain_mm": round(rain_year, 0),
+        "monthly": monthly,
+    }
+    CLIMATE_CACHE[key] = out
+    return out
 
 @app.get("/health")
 def health():
@@ -72,15 +136,14 @@ def health():
 def layers():
     return {"demo": False, "layers": [
         {"id": "basemap_osm", "status": "loaded", "source": "OpenStreetMap"},
-        {"id": "parcels", "status": "loaded", "source": f"Analysis grid {STEP} deg (~1 ha). Full coverage."},
-        {"id": "cadastre", "status": "gap"},
-        {"id": "weather_history", "status": "gap"},
+        {"id": "parcels", "status": "loaded", "source": "1 ha analysis grid"},
+        {"id": "weather_history", "status": "loaded_on_demand", "source": "Open-Meteo ERA5 archive 2015-2024"},
         {"id": "soil", "status": "gap"},
     ]}
 
 @app.get("/api/v1/coverage")
 def coverage():
-    return {"polygon_source": "coordinate grid", "step_deg": STEP, "approx_ha": "0.9-1.2", "gaps": ["weather_history", "soil", "cadastre"]}
+    return {"polygon_source": "coordinate grid", "step_deg": STEP, "gaps": ["soil", "cadastre"]}
 
 @app.get("/api/v1/parcels")
 def parcels(bbox: str | None = Query(default=None), limit: int = Query(default=500, ge=1, le=900)):
@@ -115,6 +178,19 @@ def parcel_one(parcel_id: str):
         raise HTTPException(404, "not a grid cell id")
     ft = cell_feature(*parsed)
     return {"parcel": ft["properties"], "geometry": ft["geometry"], "intelligence": {}}
+
+@app.get("/api/v1/parcels/{parcel_id}/climate")
+def parcel_climate(parcel_id: str):
+    parsed = parse_id(parcel_id)
+    if not parsed:
+        raise HTTPException(404, "not a grid cell id")
+    ft = cell_feature(*parsed)
+    lon, lat = ft["properties"]["centroid"]
+    try:
+        climate = climate_for(lat, lon)
+    except Exception as exc:
+        raise HTTPException(502, f"climate archive failed: {exc}") from exc
+    return {"parcel_id": parcel_id, "climate": climate}
 
 @app.get("/api/v1/geocode")
 def geocode(q: str = Query(min_length=2)):
