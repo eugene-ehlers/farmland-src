@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from enterprises import year_plan
 
 UA = "Farmland/0.8 (github.com/eugene-ehlers/farmland-src)"
 SG = "https://rest.isric.org/soilgrids/v2.0/properties/query"
@@ -62,7 +63,6 @@ def soilgrids(lat: float, lon: float) -> dict:
             top[name] = None
             continue
         factor = float((L.get("unit_measure") or {}).get("d_factor") or 1)
-        # weighted 0-30 cm if values exist
         weights = {"0-5cm": 5, "5-15cm": 10, "15-30cm": 15}
         num = den = 0.0
         found = False
@@ -98,26 +98,17 @@ def notes(soil: dict, climate: dict | None) -> list[str]:
     rain = (climate or {}).get("annual_rain_mm")
     monthly = (climate or {}).get("monthly") or []
     if ph is not None and ph < 5.5:
-        out.append("pH looks acid on the predicted map. Test before liming; do not guess a lime rate from this map.")
-    elif ph is not None and ph > 7.8:
-        out.append("pH looks alkaline on the predicted map. Watch zinc and iron; confirm with a lab sample.")
+        out.append("pH looks acid on the predicted map. Test before liming.")
     if tex in ("sandy", "sandy loam"):
-        out.append("Light texture: water and fertiliser move through quickly. Smaller, more frequent irrigation if you irrigate.")
+        out.append("Light texture: smaller, more frequent irrigation if you irrigate.")
     if tex in ("clay", "clay loam"):
-        out.append("Heavier texture: holds water, can waterlog. Avoid working the soil wet.")
+        out.append("Heavier texture: can waterlog. Avoid working the soil wet.")
     if rain is not None and rain < 450:
-        out.append("Historic rain is low for dryland maize. Treat irrigation or drought-tolerant enterprises as the default.")
+        out.append("Historic rain is low for dryland maize.")
     elif rain is not None and rain < 650:
-        out.append("Historic rain is modest. Dryland crops are possible in a good year; keep a water plan.")
-    dry = [m["month"] for m in monthly if (m.get("rain_mm") or 0) < 20]
-    if len(dry) >= 4:
-        out.append("Several very dry months in the 10-year average. Irrigation demand sits in those months if a crop is in the ground.")
-    if monthly:
-        warm = [m["month"] for m in monthly if (m.get("t_mean_c") or 0) >= 18]
-        cool = [m["month"] for m in monthly if (m.get("t_min_c") or 99) < 3]
-        if warm:
-            out.append("Warmer months in the record: " + ", ".join(warm) + ". That is the usual growing window for summer crops.")
-        if cool:
-            out.append("Months with cold nights in the record: " + ", ".join(cool) + ". Frost-sensitive crops need cover or a later start.")
-    out.append("Fertiliser, lime and exact irrigation millimetres wait for a soil test on this plot, then we store that lab row on these cell ids.")
+        out.append("Historic rain is modest. Keep a water plan.")
+    out.append("Lime and fertiliser rates wait for a lab sample stored on these cell ids.")
     return out
+
+def pack(soil: dict, climate: dict | None) -> dict:
+    return {"soil": soil, "notes": notes(soil, climate), "enterprises": year_plan(climate, soil)}
