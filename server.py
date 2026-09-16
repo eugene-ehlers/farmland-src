@@ -14,7 +14,7 @@ STATIC = ROOT / "static"
 sys.path.insert(0, str(ROOT / "data"))
 from chirps import monthly_chirps  # type: ignore
 from soil import soilgrids, pack as pack_soil  # type: ignore
-from crops import for_month, card as crop_card, CROPS  # type: ignore
+from crops import for_window, card as crop_card, CROPS  # type: ignore
 
 UA = "Farmland/0.9"
 STEP = 0.001
@@ -62,12 +62,8 @@ def cell_feature(ix, iy):
         "type": "Feature",
         "id": pid,
         "geometry": {"type": "Polygon", "coordinates": [[[round(w,6),round(s,6)],[round(e,6),round(s,6)],[round(e,6),round(n,6)],[round(w,6),round(n,6)],[round(w,6),round(s,6)]]]},
-        "properties": {
-            "parcel_id": pid, "sg_code": None, "name": f"Analysis cell {pid}",
-            "extent_ha": ha, "kind": "grid", "step_deg": STEP,
-            "centroid": [round(mid_lon, 5), round(mid_lat, 5)],
-            "source": "Coordinate grid (~1 ha).",
-        },
+        "properties": {"parcel_id": pid, "sg_code": None, "name": f"Analysis cell {pid}",
+            "extent_ha": ha, "kind": "grid", "centroid": [round(mid_lon, 5), round(mid_lat, 5)]},
     }
 
 def _avg(xs):
@@ -78,12 +74,9 @@ def climate_for(lat: float, lon: float) -> dict:
     key = f"{lat:.4f},{lon:.4f}"
     if key in CLIMATE_CACHE:
         return CLIMATE_CACHE[key]
-    params = {
-        "latitude": f"{lat:.4f}", "longitude": f"{lon:.4f}",
-        "start_date": "2015-01-01", "end_date": "2024-12-31",
+    params = {"latitude": f"{lat:.4f}", "longitude": f"{lon:.4f}", "start_date": "2015-01-01", "end_date": "2024-12-31",
         "daily": "temperature_2m_mean,temperature_2m_max,temperature_2m_min,precipitation_sum,relative_humidity_2m_mean,shortwave_radiation_sum",
-        "timezone": "Africa/Johannesburg",
-    }
+        "timezone": "Africa/Johannesburg"}
     data = get_json("https://archive-api.open-meteo.com/v1/archive?" + urlencode(params))
     daily = data.get("daily") or {}
     times = daily.get("time") or []
@@ -105,8 +98,10 @@ def climate_for(lat: float, lon: float) -> dict:
         rain_days = [x for x in b["p"] if x is not None]
         monthly_rain = round(sum(rain_days) / 10.0, 1) if rain_days else None
         if monthly_rain is not None: rain_year += monthly_rain
-        monthly.append({"month": MONTHS[m-1], "rain_mm": monthly_rain, "rain_chirps_mm": chirps["monthly_mm"][m-1] if chirps else None,
-            "t_mean_c": _avg(b["t"]), "t_max_c": _avg(b["tx"]), "t_min_c": _avg(b["tn"]), "rh_pct": _avg(b["h"]), "sun_mj_m2": _avg(b["s"])})
+        monthly.append({"month": MONTHS[m-1], "rain_mm": monthly_rain,
+            "rain_chirps_mm": chirps["monthly_mm"][m-1] if chirps else None,
+            "t_mean_c": _avg(b["t"]), "t_max_c": _avg(b["tx"]), "t_min_c": _avg(b["tn"]),
+            "rh_pct": _avg(b["h"]), "sun_mj_m2": _avg(b["s"])})
     out = {"period": "2015-01-01 to 2024-12-31", "source": "ERA5 via Open-Meteo",
         "latitude": data.get("latitude"), "longitude": data.get("longitude"), "elevation_m": data.get("elevation"),
         "annual_rain_mm": round(rain_year, 0), "annual_chirps_mm": chirps["annual_mm"] if chirps else None, "monthly": monthly}
@@ -125,13 +120,11 @@ def parcels(bbox: str | None = Query(default=None), limit: int = Query(default=5
     if e <= w or n <= s or (e-w) > 0.12 or (n-s) > 0.12:
         return {"type": "FeatureCollection", "features": [], "note": "Zoom in further"}
     ix0, iy0 = ix_iy(w+1e-12, s+1e-12); ix1, iy1 = ix_iy(e-1e-12, n-1e-12)
-    feats, truncated = [], False
+    feats = []
     for iy in range(iy0, iy1+1):
         for ix in range(ix0, ix1+1):
-            if len(feats) >= limit:
-                truncated = True; break
+            if len(feats) >= limit: return {"type": "FeatureCollection", "features": feats, "count": len(feats)}
             feats.append(cell_feature(ix, iy))
-        if truncated: break
     return {"type": "FeatureCollection", "features": feats, "count": len(feats)}
 
 @app.get("/api/v1/parcels/{parcel_id}")
@@ -163,9 +156,9 @@ def parcel_soil(parcel_id: str):
     return {"parcel_id": parcel_id, **SOIL_CACHE[key]}
 
 @app.get("/api/v1/crops")
-def crops(month: str | None = Query(default=None)):
+def crops(month: str | None = Query(default=None), regime: str | None = Query(default=None)):
     if month:
-        return {"month": month, "crops": for_month(month)}
+        return {"month": month, "regime": regime, "crops": for_window([month[:3].title()], regime)}
     return {"crops": [{"id": k, "name": v["name"], "months": v["months"]} for k, v in CROPS.items()]}
 
 @app.get("/api/v1/crops/{crop_id}")
