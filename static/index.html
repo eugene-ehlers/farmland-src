@@ -15,20 +15,21 @@
       <span class="sub">South Africa and neighbours</span>
     </div>
     <form id="search-form" autocomplete="off">
-      <input id="search" type="search" placeholder="Farm name, parcel id, or lat,lng" />
+      <input id="search" type="search" placeholder="Town, city, or lat,lng" />
       <button type="submit">Find</button>
     </form>
   </header>
   <div class="banner">
-    Southern Africa basemap. Demo farm portions exist only in Limpopo for now — CSG extract not loaded.
-    Next: known data versus gaps. No official SG/LPI codes.
+    OpenStreetMap is loaded (towns, rivers, roads, rail, relief names).
+    No farm polygons and no invented weather or soil values.
+    Official cadastre and historic climate still a gap.
   </div>
   <aside id="dossier" class="dossier" hidden>
     <button class="close" id="close-dossier" aria-label="Close">×</button>
     <div id="dossier-body"></div>
   </aside>
   <footer class="legal">
-    Farmland is indicative land intelligence. It is not a title deed, survey, or soil test.
+    Farmland is an agricultural land database. It is not a title deed, survey, or soil test.
   </footer>
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="/static/app.js"></script>
