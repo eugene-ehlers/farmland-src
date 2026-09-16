@@ -10,13 +10,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 STATIC = Path(__file__).resolve().parent / "static"
-UA = "Farmland/0.4 (github.com/eugene-ehlers/farmland-src)"
-# ~1.1 km cells. Covers RSA + Namibia, Botswana, Zimbabwe, Mozambique, Lesotho, Eswatini.
-STEP = 0.01
+UA = "Farmland/0.5 (github.com/eugene-ehlers/farmland-src)"
+# ~110 m / ~1 ha at mid-RSA latitudes.
+STEP = 0.001
 ORIGIN_W, ORIGIN_S = 11.50, -35.80
 ORIGIN_E, ORIGIN_N = 36.20, -15.40
 
-app = FastAPI(title="Farmland", version="0.4.0")
+app = FastAPI(title="Farmland", version="0.5.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 
 def get_json(url, timeout=12):
@@ -47,12 +47,12 @@ def parse_id(pid: str):
 def cell_feature(ix, iy):
     w, s, e, n = cell_bounds(ix, iy)
     mid_lat = (s + n) / 2
-    ha = round(abs((e - w) * 111_320.0 * math.cos(math.radians(mid_lat)) * (n - s) * 110_540.0) / 10_000.0, 1)
+    ha = round(abs((e - w) * 111_320.0 * math.cos(math.radians(mid_lat)) * (n - s) * 110_540.0) / 10_000.0, 2)
     pid = cell_id(ix, iy)
     return {
         "type": "Feature",
         "id": pid,
-        "geometry": {"type": "Polygon", "coordinates": [[[round(w,5),round(s,5)],[round(e,5),round(s,5)],[round(e,5),round(n,5)],[round(w,5),round(n,5)],[round(w,5),round(s,5)]]]},
+        "geometry": {"type": "Polygon", "coordinates": [[[round(w,6),round(s,6)],[round(e,6),round(s,6)],[round(e,6),round(n,6)],[round(w,6),round(n,6)],[round(w,6),round(s,6)]]]},
         "properties": {
             "parcel_id": pid,
             "sg_code": None,
@@ -60,7 +60,7 @@ def cell_feature(ix, iy):
             "extent_ha": ha,
             "kind": "grid",
             "step_deg": STEP,
-            "source": "Coordinate grid. Not a cadastral farm portion.",
+            "source": "Coordinate grid (~1 ha). Not a cadastral farm portion.",
         },
     }
 
@@ -72,18 +72,18 @@ def health():
 def layers():
     return {"demo": False, "layers": [
         {"id": "basemap_osm", "status": "loaded", "source": "OpenStreetMap"},
-        {"id": "parcels", "status": "loaded", "source": f"Analysis grid {STEP} deg (~1 km). Full coverage of the southern Africa frame."},
-        {"id": "cadastre", "status": "gap", "note": "Legal CSG farm portions can join later; they are not the grain."},
+        {"id": "parcels", "status": "loaded", "source": f"Analysis grid {STEP} deg (~1 ha). Full coverage."},
+        {"id": "cadastre", "status": "gap"},
         {"id": "weather_history", "status": "gap"},
         {"id": "soil", "status": "gap"},
     ]}
 
 @app.get("/api/v1/coverage")
 def coverage():
-    return {"polygon_source": "coordinate grid", "step_deg": STEP, "sg_code": None, "gaps": ["weather_history", "soil", "cadastre"]}
+    return {"polygon_source": "coordinate grid", "step_deg": STEP, "approx_ha": "0.9-1.2", "gaps": ["weather_history", "soil", "cadastre"]}
 
 @app.get("/api/v1/parcels")
-def parcels(bbox: str | None = Query(default=None), limit: int = Query(default=400, ge=1, le=800)):
+def parcels(bbox: str | None = Query(default=None), limit: int = Query(default=500, ge=1, le=900)):
     if not bbox:
         return {"type": "FeatureCollection", "features": [], "note": "Pass bbox=W,S,E,N"}
     try:
@@ -93,12 +93,11 @@ def parcels(bbox: str | None = Query(default=None), limit: int = Query(default=4
     w = max(w, ORIGIN_W); s = max(s, ORIGIN_S); e = min(e, ORIGIN_E); n = min(n, ORIGIN_N)
     if e <= w or n <= s:
         return {"type": "FeatureCollection", "features": []}
-    if (e - w) > 0.55 or (n - s) > 0.55:
-        return {"type": "FeatureCollection", "features": [], "note": "Zoom in to draw analysis cells"}
-    ix0, iy0 = ix_iy(w + 1e-9, s + 1e-9)
-    ix1, iy1 = ix_iy(e - 1e-9, n - 1e-9)
-    feats = []
-    truncated = False
+    if (e - w) > 0.12 or (n - s) > 0.12:
+        return {"type": "FeatureCollection", "features": [], "note": "Zoom in further to draw ~1 ha cells"}
+    ix0, iy0 = ix_iy(w + 1e-12, s + 1e-12)
+    ix1, iy1 = ix_iy(e - 1e-12, n - 1e-12)
+    feats, truncated = [], False
     for iy in range(iy0, iy1 + 1):
         for ix in range(ix0, ix1 + 1):
             if len(feats) >= limit:
