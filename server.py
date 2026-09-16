@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import json, math
+import json, math, sys
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -9,15 +9,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-STATIC = Path(__file__).resolve().parent / "static"
-UA = "Farmland/0.6 (github.com/eugene-ehlers/farmland-src)"
+ROOT = Path(__file__).resolve().parent
+STATIC = ROOT / "static"
+sys.path.insert(0, str(ROOT / "data"))
+from chirps import monthly_chirps  # type: ignore
+
+UA = "Farmland/0.7 (github.com/eugene-ehlers/farmland-src)"
 STEP = 0.001
 ORIGIN_W, ORIGIN_S = 11.50, -35.80
 ORIGIN_E, ORIGIN_N = 36.20, -15.40
 MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 CLIMATE_CACHE: dict[str, dict] = {}
 
-app = FastAPI(title="Farmland", version="0.6.0")
+app = FastAPI(title="Farmland", version="0.7.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 
 def get_json(url, timeout=40):
@@ -96,18 +100,24 @@ def climate_for(lat: float, lon: float) -> dict:
         if daily.get("precipitation_sum"): b["p"].append(daily["precipitation_sum"][i])
         if daily.get("relative_humidity_2m_mean"): b["h"].append(daily["relative_humidity_2m_mean"][i])
         if daily.get("shortwave_radiation_sum"): b["s"].append(daily["shortwave_radiation_sum"][i])
+    chirps = None
+    try:
+        chirps = monthly_chirps(lat, lon)
+    except Exception:
+        chirps = None
     monthly = []
     rain_year = 0.0
     for m in range(1, 13):
         b = buckets[m]
-        # mean daily rain * days in a 10-year month stack / 10 years ≈ monthly total
         rain_days = [x for x in b["p"] if x is not None]
         monthly_rain = round(sum(rain_days) / 10.0, 1) if rain_days else None
         if monthly_rain is not None:
             rain_year += monthly_rain
+        chirps_m = chirps["monthly_mm"][m-1] if chirps else None
         monthly.append({
             "month": MONTHS[m - 1],
             "rain_mm": monthly_rain,
+            "rain_chirps_mm": chirps_m,
             "t_mean_c": _avg(b["t"]),
             "t_max_c": _avg(b["tx"]),
             "t_min_c": _avg(b["tn"]),
@@ -116,13 +126,15 @@ def climate_for(lat: float, lon: float) -> dict:
         })
     out = {
         "period": "2015-01-01 to 2024-12-31",
-        "source": "Open-Meteo archive (ERA5 / ERA5-Land reanalysis). Not a SAWS station record.",
-        "scale": "~9-25 km native grid, sampled at cell centroid",
+        "source": "ERA5 via Open-Meteo. Not a SAWS station.",
+        "chirps_source": "CHIRPS v2 via ClimateSERV (~5 km, station+satellite rain)",
+        "scale": "ERA5 ~9-25 km; CHIRPS ~5 km; sampled at cell centroid",
         "confidence": "indicative historic climate",
         "latitude": data.get("latitude"),
         "longitude": data.get("longitude"),
         "elevation_m": data.get("elevation"),
         "annual_rain_mm": round(rain_year, 0),
+        "annual_chirps_mm": chirps["annual_mm"] if chirps else None,
         "monthly": monthly,
     }
     CLIMATE_CACHE[key] = out
@@ -135,15 +147,16 @@ def health():
 @app.get("/api/v1/layers")
 def layers():
     return {"demo": False, "layers": [
-        {"id": "basemap_osm", "status": "loaded", "source": "OpenStreetMap"},
-        {"id": "parcels", "status": "loaded", "source": "1 ha analysis grid"},
-        {"id": "weather_history", "status": "loaded_on_demand", "source": "Open-Meteo ERA5 archive 2015-2024"},
+        {"id": "basemap_osm", "status": "loaded"},
+        {"id": "parcels", "status": "loaded"},
+        {"id": "weather_era5", "status": "loaded_on_demand", "source": "Open-Meteo ERA5 2015-2024"},
+        {"id": "weather_chirps", "status": "loaded_on_demand", "source": "CHIRPS v2 2015-2024"},
         {"id": "soil", "status": "gap"},
     ]}
 
 @app.get("/api/v1/coverage")
 def coverage():
-    return {"polygon_source": "coordinate grid", "step_deg": STEP, "gaps": ["soil", "cadastre"]}
+    return {"polygon_source": "coordinate grid", "step_deg": STEP, "gaps": ["soil", "cadastre", "saws_station"]}
 
 @app.get("/api/v1/parcels")
 def parcels(bbox: str | None = Query(default=None), limit: int = Query(default=500, ge=1, le=900)):
