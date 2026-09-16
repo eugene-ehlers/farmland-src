@@ -1,8 +1,11 @@
-const LIMPOPO=[26.4,-25.5,31.9,-22.15],CENTER=[29.45,-23.90];
+const SA_BBOX=[16.0,-35.0,33.0,-22.0];
+const CENTER=[24.8,-28.6];
 const OSM={version:8,sources:{osm:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,attribution:'© OpenStreetMap'},esri:{type:'raster',tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],tileSize:256,attribution:'Esri World Imagery'}},layers:[{id:'osm',type:'raster',source:'osm'}]};
-const map=new maplibregl.Map({container:'map',style:OSM,center:CENTER,zoom:10,maxBounds:[[25.2,-26.4],[33.2,-21.3]]});
+const map=new maplibregl.Map({
+  container:'map',style:OSM,center:CENTER,zoom:5,
+  maxBounds:[[9.5,-36.8],[41.5,-15.2]]
+});
 map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-left');
-let satOn=false;
 function esc(s){return String(s??'').replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>')}
 function lis(arr){return (arr||[]).map(x=>`<li>${esc(x)}</li>`).join('')}
 function dossierHtml(d){
@@ -26,36 +29,27 @@ ${entBlock}
 async function openDossier(id){const r=await fetch('/api/v1/parcels/'+encodeURIComponent(id));if(!r.ok)return;document.getElementById('dossier-body').innerHTML=dossierHtml(await r.json());document.getElementById('dossier').hidden=false;}
 function selectParcel(id){if(map.getLayer('parcels-hi'))map.setFilter('parcels-hi',['==',['get','parcel_id'],id]);openDossier(id);}
 document.getElementById('close-dossier').onclick=()=>{document.getElementById('dossier').hidden=true};
-map.on('load',async()=>{const fc=await(await fetch(`/api/v1/parcels?bbox=${LIMPOPO.join(',')}&limit=500`)).json();
-map.addSource('parcels',{type:'geojson',data:fc});
-map.addLayer({id:'parcels-fill',type:'fill',source:'parcels',paint:{'fill-color':'#6b4f2a','fill-opacity':0.45}});
-map.addLayer({id:'parcels-line',type:'line',source:'parcels',paint:{'line-color':'#c4a35a','line-width':2}});
-map.addLayer({id:'parcels-dots',type:'circle',source:'parcels',paint:{'circle-radius':['interpolate',['linear'],['zoom'],6,5,10,7,14,2],'circle-color':'#c4a35a','circle-stroke-color':'#1b2416','circle-stroke-width':1.2}});
-map.addLayer({id:'parcels-hi',type:'line',source:'parcels',filter:['==',['get','parcel_id'],''],paint:{'line-color':'#fff3c4','line-width':4}});
-['parcels-fill','parcels-dots'].forEach(lyr=>{
-  map.on('click',lyr,e=>{if(e.features&&e.features[0])selectParcel(e.features[0].properties.parcel_id);});
-  map.on('mouseenter',lyr,()=>map.getCanvas().style.cursor='pointer');
-  map.on('mouseleave',lyr,()=>map.getCanvas().style.cursor='');
+map.on('load',async()=>{
+  const fc=await(await fetch(`/api/v1/parcels?bbox=${SA_BBOX.join(',')}&limit=500`)).json();
+  map.addSource('parcels',{type:'geojson',data:fc});
+  map.addLayer({id:'parcels-fill',type:'fill',source:'parcels',paint:{'fill-color':'#6b4f2a','fill-opacity':0.45}});
+  map.addLayer({id:'parcels-line',type:'line',source:'parcels',paint:{'line-color':'#c4a35a','line-width':2}});
+  map.addLayer({id:'parcels-dots',type:'circle',source:'parcels',paint:{'circle-radius':['interpolate',['linear'],['zoom'],4,4,7,6,12,3],'circle-color':'#c4a35a','circle-stroke-color':'#1b2416','circle-stroke-width':1}});
+  map.addLayer({id:'parcels-hi',type:'line',source:'parcels',filter:['==',['get','parcel_id'],''],paint:{'line-color':'#fff3c4','line-width':4}});
+  ['parcels-fill','parcels-dots'].forEach(lyr=>{
+    map.on('click',lyr,e=>{if(e.features&&e.features[0])selectParcel(e.features[0].properties.parcel_id);});
+    map.on('mouseenter',lyr,()=>map.getCanvas().style.cursor='pointer');
+    map.on('mouseleave',lyr,()=>map.getCanvas().style.cursor='');
+  });
 });
-if(fc.features&&fc.features.length){
-  const b=new maplibregl.LngLatBounds();
-  fc.features.forEach(f=>f.geometry.coordinates[0].forEach(c=>b.extend(c)));
-  map.fitBounds(b,{padding:48,maxZoom:11});
-}
-});
-document.getElementById('chips').addEventListener('click',ev=>{const btn=ev.target.closest('.chip');if(!btn)return;const layer=btn.dataset.layer;
-if(layer==='satellite'){satOn=!satOn;btn.classList.toggle('on',satOn);if(satOn){if(!map.getLayer('esri'))map.addLayer({id:'esri',type:'raster',source:'esri'},'parcels-fill');if(map.getLayer('osm'))map.setLayoutProperty('osm','visibility','none');map.setLayoutProperty('esri','visibility','visible');}else{if(map.getLayer('esri'))map.setLayoutProperty('esri','visibility','none');if(map.getLayer('osm'))map.setLayoutProperty('osm','visibility','visible');}return;}
-btn.classList.toggle('on');const on=btn.classList.contains('on');
-if(layer==='parcels'){const vis=on?'visible':'none';['parcels-fill','parcels-line','parcels-hi','parcels-dots'].forEach(id=>{if(map.getLayer(id))map.setLayoutProperty(id,'visibility',vis);});return;}
-if(!map.getLayer('parcels-fill'))return;
-if(layer==='settlement'&&on)map.setPaintProperty('parcels-fill','fill-color',['match',['get','layer_settlement'],'town','#c45c26','rural','#d4a017','#3d6b2f']);
-else if(on)map.setPaintProperty('parcels-fill','fill-color',({land_type:'#6b4f2a',climate:'#2f5f7a',hydro:'#2a6f8a',relief:'#5a4a32'})[layer]||'#6b4f2a');
-else map.setPaintProperty('parcels-fill','fill-color','#6b4f2a');
-});
-document.getElementById('search-form').addEventListener('submit',async e=>{e.preventDefault();const raw=document.getElementById('search').value.trim();if(!raw)return;
-const coord=raw.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);if(coord){const a=+coord[1],b=+coord[2];const lat=Math.abs(a)>20?a:b,lon=Math.abs(a)>20?b:a;map.flyTo({center:[lon,lat],zoom:13});return;}
-const fc=await(await fetch(`/api/v1/parcels?bbox=${LIMPOPO.join(',')}&limit=500&q=${encodeURIComponent(raw)}`)).json();
-if(!fc.features.length){alert('No demo parcel name matched.');return;}const f=fc.features[0],ring=f.geometry.coordinates[0];
-const xs=ring.map(p=>p[0]),ys=ring.map(p=>p[1]);map.fitBounds([[Math.min(...xs),Math.min(...ys)],[Math.max(...xs),Math.max(...ys)]],{padding:60,maxZoom:14});
-selectParcel(f.properties.parcel_id);
+document.getElementById('search-form').addEventListener('submit',async e=>{
+  e.preventDefault();const raw=document.getElementById('search').value.trim();if(!raw)return;
+  const coord=raw.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
+  if(coord){const a=+coord[1],b=+coord[2];const lat=Math.abs(a)>20?a:b,lon=Math.abs(a)>20?b:a;map.flyTo({center:[lon,lat],zoom:12});return;}
+  const fc=await(await fetch(`/api/v1/parcels?bbox=${SA_BBOX.join(',')}&limit=500&q=${encodeURIComponent(raw)}`)).json();
+  if(!fc.features.length){alert('No demo parcel name matched. Demo farms are Limpopo-only for now.');return;}
+  const f=fc.features[0],ring=f.geometry.coordinates[0];
+  const xs=ring.map(p=>p[0]),ys=ring.map(p=>p[1]);
+  map.fitBounds([[Math.min(...xs),Math.min(...ys)],[Math.max(...xs),Math.max(...ys)]],{padding:60,maxZoom:14});
+  selectParcel(f.properties.parcel_id);
 });
