@@ -14,3 +14,6 @@
 @media(min-width:721px){.dossier{top:0;right:0;width:min(380px,92vw);height:100%}}
 h2{margin:4px 0 6px}.ha{font:600 13px system-ui;color:var(--field)}.meta,.foot{font:12px system-ui;color:var(--muted)}.block{border-top:1px solid #ddd3bd;padding:10px 0}.block h3{margin:0 0 4px;font-size:.82rem;text-transform:uppercase;color:var(--soil)}
 .dossier ul{margin:6px 0 8px 18px;padding:0;font:14px/1.35 system-ui}
+table.clim{width:100%;border-collapse:collapse;font:12px/1.3 system-ui;margin:8px 0}
+table.clim th,table.clim td{text-align:right;padding:3px 4px;border-bottom:1px solid #e6dcc4}
+table.clim th:first-child,table.clim td:first-child{text-align:left}
