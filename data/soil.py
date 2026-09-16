@@ -4,6 +4,7 @@ import json
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from enterprises import year_plan
+from markets import nearest as nearest_markets
 
 UA = "Farmland/0.8 (github.com/eugene-ehlers/farmland-src)"
 SG = "https://rest.isric.org/soilgrids/v2.0/properties/query"
@@ -21,14 +22,6 @@ def _conv(name, raw, factor):
     v = raw / float(factor)
     if name in ("clay", "sand", "silt"):
         return round(v, 1)
-    if name == "phh2o":
-        return round(v, 2)
-    if name == "soc":
-        return round(v, 2)
-    if name == "cec":
-        return round(v, 2)
-    if name == "bdod":
-        return round(v, 2)
     return round(v, 2)
 
 def texture_class(sand, silt, clay):
@@ -77,9 +70,7 @@ def soilgrids(lat: float, lon: float) -> dict:
         top[name] = round(num / den, 2) if found and den else None
     tex = texture_class(top.get("sand"), top.get("silt"), top.get("clay"))
     return {
-        "source": "SoilGrids 2.0 (ISRIC), 250 m predicted map sampled at cell centre. Not a pit or lab sample.",
-        "scale": "250 m",
-        "confidence": "indicative",
+        "source": "SoilGrids 2.0 (ISRIC), 250 m predicted map. Not a lab sample.",
         "texture_class": tex,
         "sand_pct": top.get("sand"),
         "silt_pct": top.get("silt"),
@@ -93,22 +84,21 @@ def soilgrids(lat: float, lon: float) -> dict:
 
 def notes(soil: dict, climate: dict | None) -> list[str]:
     out = []
-    ph = soil.get("ph_water")
-    tex = soil.get("texture_class")
     rain = (climate or {}).get("annual_rain_mm")
-    monthly = (climate or {}).get("monthly") or []
-    if ph is not None and ph < 5.5:
-        out.append("pH looks acid on the predicted map. Test before liming.")
-    if tex in ("sandy", "sandy loam"):
-        out.append("Light texture: smaller, more frequent irrigation if you irrigate.")
-    if tex in ("clay", "clay loam"):
-        out.append("Heavier texture: can waterlog. Avoid working the soil wet.")
+    if soil.get("ph_water") is not None and soil["ph_water"] < 5.5:
+        out.append("Predicted pH is acid. Test before liming.")
     if rain is not None and rain < 450:
         out.append("Historic rain is low for dryland maize.")
-    elif rain is not None and rain < 650:
-        out.append("Historic rain is modest. Keep a water plan.")
-    out.append("Lime and fertiliser rates wait for a lab sample stored on these cell ids.")
+    out.append("Lime, fertiliser and irrigation mm wait for a lab sample on these cell ids.")
     return out
 
-def pack(soil: dict, climate: dict | None) -> dict:
-    return {"soil": soil, "notes": notes(soil, climate), "enterprises": year_plan(climate, soil)}
+def pack(soil: dict, climate: dict | None, lat: float | None = None, lon: float | None = None) -> dict:
+    clat = lat if lat is not None else (climate or {}).get("latitude")
+    clon = lon if lon is not None else (climate or {}).get("longitude")
+    markets = nearest_markets(clat, clon) if clat is not None and clon is not None else None
+    return {
+        "soil": soil,
+        "notes": notes(soil, climate),
+        "enterprises": year_plan(climate, soil),
+        "markets": markets,
+    }
