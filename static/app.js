@@ -4,13 +4,25 @@ const map=new maplibregl.Map({container:'map',style:OSM,center:CENTER,zoom:10,ma
 map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-left');
 let satOn=false;
 function esc(s){return String(s??'').replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>')}
-function dossierHtml(d){const p=d.parcel,i=d.intelligence;const foot=(b)=>b?`${esc(b.source||'')} · ${esc(b.scale||'')} · ${esc(b.as_of||'')} · ${esc(b.confidence||'')}`:'not loaded';
-return `<h2>${esc(p.name)}</h2><div class="ha">${p.extent_ha} ha · ${esc(p.parcel_id)}</div><div class="meta">sg_code: ${p.sg_code==null?'null (CSG not loaded)':esc(p.sg_code)}</div>
+function lis(arr){return (arr||[]).map(x=>`<li>${esc(x)}</li>`).join('')}
+function dossierHtml(d){
+  const p=d.parcel,i=d.intelligence;
+  const foot=(b)=>b?`${esc(b.source||'')} · ${esc(b.scale||'')} · ${esc(b.as_of||'')} · ${esc(b.confidence||'')}`:'not loaded';
+  const ent=i.enterprise;
+  const entBlock=ent?`<div class="block"><h3>What fits here</h3>
+    <p>${esc(ent.fit||'')}</p>
+    <p><strong>Crops / orchards</strong></p><ul>${lis(ent.crops)}</ul>
+    <p><strong>Livestock / game</strong></p><ul>${lis(ent.livestock_game)}</ul>
+    <p class="foot">${foot(ent)}</p></div>`:
+    `<div class="block"><h3>What fits here</h3><p class="null">not loaded</p></div>`;
+  return `<h2>${esc(p.name)}</h2><div class="ha">${p.extent_ha} ha · ${esc(p.parcel_id)}</div><div class="meta">sg_code: ${p.sg_code==null?'null (CSG not loaded)':esc(p.sg_code)}</div>
 <div class="block"><h3>Land type</h3><p>${esc(i.land_type.class)}</p><p class="foot">${foot(i.land_type)}</p></div>
 <div class="block"><h3>Climate</h3><p>${esc(i.climate.class)}</p><p>${i.climate.mean_annual_rainfall_mm??'null'} mm MAR</p><p class="foot">${foot(i.climate)}</p></div>
+${entBlock}
 <div class="block"><h3>Hydro</h3><p>${esc(i.hydro.nearest_river)} (${i.hydro.km} km)</p><p>Catchment: ${esc(i.hydro.in_catchment)}</p></div>
 <div class="block"><h3>Relief</h3><p>${esc(i.relief.description)}</p><p class="foot">${esc(i.relief.source)}</p></div>
-<div class="block"><h3>Settlement</h3><p>${esc(i.settlement.class)}</p><p class="foot">${esc(i.settlement.source)} · ${esc(i.settlement.as_of)}</p></div>`;}
+<div class="block"><h3>Settlement</h3><p>${esc(i.settlement.class)}</p><p class="foot">${esc(i.settlement.source)} · ${esc(i.settlement.as_of)}</p></div>`;
+}
 async function openDossier(id){const r=await fetch('/api/v1/parcels/'+encodeURIComponent(id));if(!r.ok)return;document.getElementById('dossier-body').innerHTML=dossierHtml(await r.json());document.getElementById('dossier').hidden=false;}
 function selectParcel(id){if(map.getLayer('parcels-hi'))map.setFilter('parcels-hi',['==',['get','parcel_id'],id]);openDossier(id);}
 document.getElementById('close-dossier').onclick=()=>{document.getElementById('dossier').hidden=true};
