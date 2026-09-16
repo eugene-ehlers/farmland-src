@@ -9,21 +9,28 @@ function climateTable(c){
   const rows=c.monthly.map(m=>`<tr><td>${esc(m.month)}</td><td>${m.rain_mm??'—'}</td><td>${m.rain_chirps_mm??'—'}</td><td>${m.t_mean_c??'—'}</td><td>${m.t_min_c??'—'}/${m.t_max_c??'—'}</td><td>${m.rh_pct??'—'}</td><td>${m.sun_mj_m2??'—'}</td></tr>`).join('');
   return `<p><strong>ERA5 ${c.annual_rain_mm??'—'} mm</strong> · <strong>CHIRPS ${c.annual_chirps_mm??'—'} mm</strong> · ${c.elevation_m??'—'} m</p>
     <table class="clim"><thead><tr><th></th><th>ERA5 mm</th><th>CHIRPS mm</th><th>T °C</th><th>Min/max</th><th>RH %</th><th>Sun</th></tr></thead><tbody>${rows}</tbody></table>
-    <p class="foot">${esc(c.source)} · ${esc(c.chirps_source||'')} · ${esc(c.period)}</p>`;
+    <p class="foot">${esc(c.source||'')} · ${esc(c.period||'')}</p>`;
 }
 function soilBlock(s, notes){
   if(!s)return '<p>Loading soil…</p>';
-  const nums=s.has_values?`<p>Texture <strong>${esc(s.texture_class||'—')}</strong> · sand ${s.sand_pct??'—'}% · clay ${s.clay_pct??'—'}% · pH ${s.ph_water??'—'} · C ${s.soc_g_kg??'—'} g/kg · CEC ${s.cec_cmol_kg??'—'}</p>`:
-    '<p>SoilGrids has no predicted value at this coordinate (common in parts of South Africa on the public point API). Climate notes below still apply. Next step is a lab sample on this plot.</p>';
+  const nums=s.has_values?`<p>Texture <strong>${esc(s.texture_class||'—')}</strong> · sand ${s.sand_pct??'—'}% · clay ${s.clay_pct??'—'}% · pH ${s.ph_water??'—'}</p>`:
+    '<p>No SoilGrids value here. Climate still drives the year plan.</p>';
   const lis=(notes||[]).map(n=>`<li>${esc(n)}</li>`).join('');
-  return `${nums}<ul>${lis}</ul><p class="foot">${esc(s.source||'')}</p>`;
+  return `${nums}<ul>${lis}</ul>`;
+}
+function planBlock(p){
+  if(!p)return '';
+  const slots=(p.slots||[]).map(s=>`<li><strong>${esc(s.window)}</strong> (${esc(s.role)}): ${esc((s.examples||[]).join(', '))} — ${esc(s.why)}</li>`).join('');
+  const rot=(p.rotation_idea||[]).map(x=>`<li>${esc(x)}</li>`).join('');
+  return `<p class="meta">${esc(p.rain_regime||'')} · summer ${p.summer_rain_mm??'—'} mm · winter ${p.winter_rain_mm??'—'} mm</p>
+    <p><em>${esc(p.not)}</em></p><ul>${slots}</ul><h4>Rotation idea</h4><ul>${rot}</ul><p class="foot">${esc(p.next||'')}</p>`;
 }
 function dossierHtml(p, climate, soil){
   return `<h2>${esc(p.name)}</h2>
     <div class="ha">${p.extent_ha??'—'} ha · ${esc(p.parcel_id)}</div>
-    <div class="meta">smallholding tile · not a cadastre diagram</div>
-    <div class="block"><h3>Climate 2015–2024</h3>${climate?climateTable(climate):'<p>Loading historic weather…</p>'}</div>
-    <div class="block"><h3>Soil and what it suggests</h3>${soil?soilBlock(soil.soil, soil.notes):'<p>Loading soil…</p>'}</div>`;
+    <div class="block"><h3>Climate 2015–2024</h3>${climate?climateTable(climate):'<p>Loading…</p>'}</div>
+    <div class="block"><h3>Soil</h3>${soil?soilBlock(soil.soil, soil.notes):'<p>Loading…</p>'}</div>
+    <div class="block"><h3>Year plan (climate-fit, not historic yield)</h3>${soil&&soil.enterprises?planBlock(soil.enterprises):'<p>Loading…</p>'}</div>`;
 }
 async function openDossier(id){
   const r=await fetch('/api/v1/parcels/'+encodeURIComponent(id));
@@ -31,26 +38,15 @@ async function openDossier(id){
   const body=await r.json();
   document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,null,null);
   document.getElementById('dossier').hidden=false;
-  let climate=null;
-  try{
-    const cr=await fetch('/api/v1/parcels/'+encodeURIComponent(id)+'/climate');
-    const cj=await cr.json();
-    climate=cr.ok?cj.climate:null;
-    document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,climate,null);
-  }catch(e){}
-  try{
-    const sr=await fetch('/api/v1/parcels/'+encodeURIComponent(id)+'/soil');
-    const sj=await sr.json();
-    document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,climate, sr.ok?sj:null);
-  }catch(e){}
+  let climate=null, soil=null;
+  try{const cr=await fetch('/api/v1/parcels/'+encodeURIComponent(id)+'/climate'); const cj=await cr.json(); climate=cr.ok?cj.climate:null;}catch(e){}
+  document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,climate,soil);
+  try{const sr=await fetch('/api/v1/parcels/'+encodeURIComponent(id)+'/soil'); const sj=await sr.json(); soil=sr.ok?sj:null;}catch(e){}
+  document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,climate,soil);
 }
 document.getElementById('close-dossier').onclick=()=>{document.getElementById('dossier').hidden=true};
 async function loadParcels(){
-  if(map.getZoom()<12){
-    if(map.getSource('parcels')) map.getSource('parcels').setData({type:'FeatureCollection',features:[]});
-    banner('Zoom closer (street / farm scale) to see ~1 ha cells.');
-    return;
-  }
+  if(map.getZoom()<12){if(map.getSource('parcels')) map.getSource('parcels').setData({type:'FeatureCollection',features:[]});banner('Zoom closer to see ~1 ha cells.');return;}
   const b=map.getBounds();
   const bbox=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()].map(x=>x.toFixed(5)).join(',');
   const fc=await(await fetch('/api/v1/parcels?bbox='+bbox+'&limit=800')).json();
@@ -58,22 +54,19 @@ async function loadParcels(){
     map.addSource('parcels',{type:'geojson',data:fc});
     map.addLayer({id:'parcels-fill',type:'fill',source:'parcels',paint:{'fill-color':'#6b4f2a','fill-opacity':0.16}});
     map.addLayer({id:'parcels-line',type:'line',source:'parcels',paint:{'line-color':'#c4a35a','line-width':0.7}});
-    map.on('click','parcels-fill',e=>{openDossier(e.features[0].properties.parcel_id);});
+    map.on('click','parcels-fill',e=>openDossier(e.features[0].properties.parcel_id));
     map.on('mouseenter','parcels-fill',()=>map.getCanvas().style.cursor='pointer');
     map.on('mouseleave','parcels-fill',()=>map.getCanvas().style.cursor='');
   } else map.getSource('parcels').setData(fc);
-  const n=(fc.features||[]).length;
-  banner(n?`${n} cells (~1 ha each) in view.`:(fc.note||'Zoom closer to load cells.'));
+  banner(((fc.features||[]).length)+' cells in view.');
 }
-let t=null;
-map.on('load',loadParcels);
-map.on('moveend',()=>{clearTimeout(t);t=setTimeout(loadParcels,350);});
+let t=null; map.on('load',loadParcels); map.on('moveend',()=>{clearTimeout(t);t=setTimeout(loadParcels,350);});
 document.getElementById('search-form').addEventListener('submit',async e=>{
   e.preventDefault();
   const raw=document.getElementById('search').value.trim();if(!raw)return;
   const coord=raw.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
   if(coord){const a=+coord[1],b=+coord[2];const lat=Math.abs(a)>15?a:b,lon=Math.abs(a)>15?b:a;map.flyTo({center:[lon,lat],zoom:13});return;}
   const data=await(await fetch('/api/v1/geocode?q='+encodeURIComponent(raw))).json();
-  if(!data.results||!data.results.length){alert('No town or place matched in southern Africa.');return;}
+  if(!data.results||!data.results.length){alert('No match.');return;}
   map.flyTo({center:[data.results[0].lon,data.results[0].lat],zoom:13});
 });
