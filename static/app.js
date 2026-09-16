@@ -5,10 +5,7 @@ const map=new maplibregl.Map({container:'map',style:OSM,center:CENTER,zoom:5,max
 map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-left');
 function esc(s){return String(s??'').replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>')}
 function banner(t){const el=document.getElementById('banner');if(el)el.textContent=t;}
-function windowMonths(){
-  const i=new Date().getMonth();
-  return [0,1,2,3].map(k=>MONTHS[(i+k)%12]);
-}
+function windowMonths(){const i=new Date().getMonth();return [0,1,2,3].map(k=>MONTHS[(i+k)%12]);}
 let currentParcel=null, currentClimate=null, currentSoil=null;
 function climateTable(c){
   if(!c||!c.monthly)return '<p>Climate not loaded.</p>';
@@ -18,14 +15,15 @@ function climateTable(c){
 }
 function soilBlock(s, notes){
   if(!s)return '<p>Loading soil…</p>';
-  const nums=s.has_values?`<p>Texture <strong>${esc(s.texture_class||'—')}</strong> · sand ${s.sand_pct??'—'}% · clay ${s.clay_pct??'—'}% · pH ${s.ph_water??'—'}</p>`:'<p>No SoilGrids value on this cell. Climate and markets still apply.</p>';
+  const nums=s.has_values?`<p>Texture <strong>${esc(s.texture_class||'—')}</strong> · sand ${s.sand_pct??'—'}% · clay ${s.clay_pct??'—'}% · pH ${s.ph_water??'—'}</p>`:'<p>No SoilGrids value on this cell.</p>';
   return nums+'<ul>'+(notes||[]).map(n=>`<li>${esc(n)}</li>`).join('')+'</ul>';
 }
 function planBlock(p){
   if(!p)return '';
-  const slots=(p.slots||[]).map(s=>`<li><strong>${esc(s.window)}</strong> (${esc(s.role)}): ${esc((s.examples||[]).join(', '))}</li>`).join('');
+  const slots=(p.slots||[]).map(s=>`<li><strong>${esc(s.window)}</strong> (${esc(s.role)}): ${esc((s.examples||[]).join(', '))} — ${esc(s.why||'')}</li>`).join('');
   const rot=(p.rotation_idea||[]).map(x=>`<li>${esc(x)}</li>`).join('');
-  return `<p class="meta">${esc(p.rain_regime||'')} · summer ${p.summer_rain_mm??'—'} mm · winter ${p.winter_rain_mm??'—'} mm</p><p><em>${esc(p.not||'')}</em></p><ul>${slots}</ul><ul>${rot}</ul>`;
+  return `<p class="meta">${esc(p.rain_regime||'')} · ${p.annual_rain_mm??'—'} mm/year · summer ${p.summer_rain_mm??'—'} · winter ${p.winter_rain_mm??'—'}</p>
+    <p><em>${esc(p.disclaimer||'Not historic yield on this hectare.')}</em></p><ul>${slots}</ul><ul>${rot}</ul>`;
 }
 function marketBlock(m){
   if(!m)return '';
@@ -39,12 +37,14 @@ function bindPicker(){
     const m=monthEl.value;
     cropEl.disabled=true; cropEl.innerHTML='<option value="">Loading…</option>';
     document.getElementById('crop-card').innerHTML='';
-    if(!m){cropEl.innerHTML='<option value="">Choose a month</option>';return;}
+    if(!m)return;
     const regime=(currentSoil&&currentSoil.enterprises&&currentSoil.enterprises.rain_regime)||'';
-    const data=await(await fetch('/api/v1/crops?month='+encodeURIComponent(m)+(regime?'&regime='+encodeURIComponent(regime):''))).json();
+    const annual=(currentClimate&&currentClimate.annual_rain_mm)||'';
+    const q='/api/v1/crops?month='+encodeURIComponent(m)+'&regime='+encodeURIComponent(regime)+'&annual_mm='+encodeURIComponent(annual);
+    const data=await(await fetch(q)).json();
     const list=data.crops||[];
-    if(!list.length){cropEl.innerHTML='<option value="">No fit in this window</option>';return;}
-    cropEl.innerHTML='<option value="">Choose a crop</option>'+list.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+    if(!list.length){cropEl.innerHTML='<option value="">No crop fits this rain and month</option>';return;}
+    cropEl.innerHTML='<option value="">Choose a crop</option>'+list.map(c=>`<option value="${c.id}">${esc(c.name)}${c.note?' ('+esc(c.note)+')':''}</option>`).join('');
     cropEl.disabled=false;
   };
   monthEl.onchange=loadCrops;
@@ -52,12 +52,10 @@ function bindPicker(){
     const id=cropEl.value; const box=document.getElementById('crop-card');
     if(!id){box.innerHTML='';return;}
     const c=await(await fetch('/api/v1/crops/'+encodeURIComponent(id))).json();
-    const days=(c.growth_days||[]).join('–');
-    box.innerHTML=`<p><strong>${esc(c.name)}</strong> · ${esc(c.role||'')} · growth ${esc(days)} days</p>
-      <p><strong>Soil plan:</strong> ${esc(c.soil_plan||c.soil||'')}</p>
-      <p><strong>Irrigation plan:</strong> ${esc(c.irrigation_plan||c.irrigation||'')}</p>
-      <p><strong>Market price:</strong> ${esc(c.price_note||'Not wired live.')}</p>
-      <p class="foot">General card for this crop type on this climate. Not a lab script and not a live quote.</p>`;
+    box.innerHTML=`<p><strong>${esc(c.name)}</strong> · ${esc(c.role||'')} · ${(c.growth_days||[]).join('–')} days</p>
+      <p><strong>Soil plan:</strong> ${esc(c.soil_plan||'')}</p>
+      <p><strong>Irrigation plan:</strong> ${esc(c.irrigation_plan||'')}</p>
+      <p><strong>Market:</strong> ${esc(c.price_note||'')}</p>`;
   };
   loadCrops();
 }
@@ -67,16 +65,14 @@ function renderDossier(){
   const monthOpts=win.map((m,i)=>`<option value="${m}">${i===0?m+' (now)':m}</option>`).join('');
   document.getElementById('dossier-body').innerHTML=`<h2>${esc(p.name)}</h2>
     <div class="ha">${p.extent_ha??'—'} ha · ${esc(p.parcel_id)}</div>
-    <div class="block"><h3>This land</h3>
-      <div>${currentClimate?climateTable(currentClimate):'<p>Loading climate…</p>'}</div>
-    </div>
+    <div class="block"><h3>This land</h3>${currentClimate?climateTable(currentClimate):'<p>Loading climate…</p>'}</div>
     <div class="block"><h3>Soil</h3>${currentSoil?soilBlock(currentSoil.soil,currentSoil.notes):'<p>Loading soil…</p>'}</div>
     <div class="block"><h3>Year pattern</h3>${currentSoil&&currentSoil.enterprises?planBlock(currentSoil.enterprises):'<p>Loading…</p>'}</div>
     <div class="block"><h3>Nearest markets</h3>${currentSoil&&currentSoil.markets?marketBlock(currentSoil.markets):'<p>Loading…</p>'}</div>
     <div class="block"><h3>Plant in this window</h3>
-      <p class="meta">Current month and the next three. Crops are those that fit this land’s rain season.</p>
+      <p class="meta">This month and the next three. List matches this cell’s rainfall.</p>
       <label>Month <select id="pick-month">${monthOpts}</select></label>
-      <label>Crop <select id="pick-crop"><option value="">Choose month</option></select></label>
+      <label>Crop <select id="pick-crop"></select></label>
       <div id="crop-card"></div>
     </div>`;
   bindPicker();
