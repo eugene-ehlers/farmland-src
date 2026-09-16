@@ -6,17 +6,17 @@ function esc(s){return String(s??'').replace(/&/g,'&').replace(/</g,'<').replace
 function banner(t){const el=document.getElementById('banner');if(el)el.textContent=t;}
 function climateTable(c){
   if(!c||!c.monthly)return '<p>Climate not loaded.</p>';
-  const rows=c.monthly.map(m=>`<tr><td>${esc(m.month)}</td><td>${m.rain_mm??'—'}</td><td>${m.t_mean_c??'—'}</td><td>${m.t_min_c??'—'}/${m.t_max_c??'—'}</td><td>${m.rh_pct??'—'}</td><td>${m.sun_mj_m2??'—'}</td></tr>`).join('');
-  return `<p><strong>${c.annual_rain_mm??'—'} mm</strong> mean annual rain · ${c.elevation_m??'—'} m elevation</p>
-    <table class="clim"><thead><tr><th></th><th>Rain mm</th><th>T °C</th><th>Min/max</th><th>RH %</th><th>Sun MJ/m²</th></tr></thead><tbody>${rows}</tbody></table>
-    <p class="foot">${esc(c.source)} · ${esc(c.period)} · ${esc(c.scale)} · ${esc(c.confidence)}</p>`;
+  const rows=c.monthly.map(m=>`<tr><td>${esc(m.month)}</td><td>${m.rain_mm??'—'}</td><td>${m.rain_chirps_mm??'—'}</td><td>${m.t_mean_c??'—'}</td><td>${m.t_min_c??'—'}/${m.t_max_c??'—'}</td><td>${m.rh_pct??'—'}</td><td>${m.sun_mj_m2??'—'}</td></tr>`).join('');
+  return `<p><strong>ERA5 ${c.annual_rain_mm??'—'} mm</strong> · <strong>CHIRPS ${c.annual_chirps_mm??'—'} mm</strong> mean annual rain · ${c.elevation_m??'—'} m</p>
+    <table class="clim"><thead><tr><th></th><th>ERA5 mm</th><th>CHIRPS mm</th><th>T °C</th><th>Min/max</th><th>RH %</th><th>Sun</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="foot">${esc(c.source)} · ${esc(c.chirps_source||'CHIRPS v2 ~5 km')} · ${esc(c.period)}</p>`;
 }
 function dossierHtml(p, climate){
   return `<h2>${esc(p.name)}</h2>
     <div class="ha">${p.extent_ha??'—'} ha · ${esc(p.parcel_id)}</div>
     <div class="meta">smallholding tile · not a cadastre diagram</div>
     <div class="block"><h3>Climate 2015–2024</h3>${climate?climateTable(climate):'<p>Loading historic weather…</p>'}</div>
-    <div class="block"><h3>Not on this row yet</h3><p>Soil / land type, enterprise calendar, markets.</p></div>`;
+    <div class="block"><h3>Not on this row yet</h3><p>Soil / land type, enterprise calendar, markets. SAWS/ARC station overlay needs a licence.</p></div>`;
 }
 async function openDossier(id){
   const r=await fetch('/api/v1/parcels/'+encodeURIComponent(id));
