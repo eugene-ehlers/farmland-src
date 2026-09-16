@@ -13,15 +13,17 @@ ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 sys.path.insert(0, str(ROOT / "data"))
 from chirps import monthly_chirps  # type: ignore
+from soil import soilgrids, notes as soil_notes  # type: ignore
 
-UA = "Farmland/0.7 (github.com/eugene-ehlers/farmland-src)"
+UA = "Farmland/0.8 (github.com/eugene-ehlers/farmland-src)"
 STEP = 0.001
 ORIGIN_W, ORIGIN_S = 11.50, -35.80
 ORIGIN_E, ORIGIN_N = 36.20, -15.40
 MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 CLIMATE_CACHE: dict[str, dict] = {}
+SOIL_CACHE: dict[str, dict] = {}
 
-app = FastAPI(title="Farmland", version="0.7.0")
+app = FastAPI(title="Farmland", version="0.8.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 
 def get_json(url, timeout=40):
@@ -147,29 +149,19 @@ def health():
 @app.get("/api/v1/layers")
 def layers():
     return {"demo": False, "layers": [
-        {"id": "basemap_osm", "status": "loaded"},
-        {"id": "parcels", "status": "loaded"},
-        {"id": "weather_era5", "status": "loaded_on_demand", "source": "Open-Meteo ERA5 2015-2024"},
-        {"id": "weather_chirps", "status": "loaded_on_demand", "source": "CHIRPS v2 2015-2024"},
-        {"id": "soil", "status": "gap"},
+        {"id": "weather_era5", "status": "loaded_on_demand"},
+        {"id": "weather_chirps", "status": "loaded_on_demand"},
+        {"id": "soil_grids", "status": "loaded_on_demand", "source": "SoilGrids 250m where ISRIC returns a value"},
+        {"id": "soil_lab", "status": "gap", "note": "Once-off plot analysis stored later on these cell ids"},
     ]}
-
-@app.get("/api/v1/coverage")
-def coverage():
-    return {"polygon_source": "coordinate grid", "step_deg": STEP, "gaps": ["soil", "cadastre", "saws_station"]}
 
 @app.get("/api/v1/parcels")
 def parcels(bbox: str | None = Query(default=None), limit: int = Query(default=500, ge=1, le=900)):
     if not bbox:
-        return {"type": "FeatureCollection", "features": [], "note": "Pass bbox=W,S,E,N"}
-    try:
-        w, s, e, n = [float(x.strip()) for x in bbox.split(",")]
-    except ValueError:
-        raise HTTPException(400, "bbox must be W,S,E,N")
-    w = max(w, ORIGIN_W); s = max(s, ORIGIN_S); e = min(e, ORIGIN_E); n = min(n, ORIGIN_N)
-    if e <= w or n <= s:
         return {"type": "FeatureCollection", "features": []}
-    if (e - w) > 0.12 or (n - s) > 0.12:
+    w, s, e, n = [float(x.strip()) for x in bbox.split(",")]
+    w = max(w, ORIGIN_W); s = max(s, ORIGIN_S); e = min(e, ORIGIN_E); n = min(n, ORIGIN_N)
+    if e <= w or n <= s or (e - w) > 0.12 or (n - s) > 0.12:
         return {"type": "FeatureCollection", "features": [], "note": "Zoom in further to draw ~1 ha cells"}
     ix0, iy0 = ix_iy(w + 1e-12, s + 1e-12)
     ix1, iy1 = ix_iy(e - 1e-12, n - 1e-12)
@@ -182,7 +174,7 @@ def parcels(bbox: str | None = Query(default=None), limit: int = Query(default=5
             feats.append(cell_feature(ix, iy))
         if truncated:
             break
-    return {"type": "FeatureCollection", "features": feats, "source": "grid", "count": len(feats), "truncated": truncated}
+    return {"type": "FeatureCollection", "features": feats, "count": len(feats), "truncated": truncated}
 
 @app.get("/api/v1/parcels/{parcel_id}")
 def parcel_one(parcel_id: str):
@@ -190,20 +182,34 @@ def parcel_one(parcel_id: str):
     if not parsed:
         raise HTTPException(404, "not a grid cell id")
     ft = cell_feature(*parsed)
-    return {"parcel": ft["properties"], "geometry": ft["geometry"], "intelligence": {}}
+    return {"parcel": ft["properties"], "geometry": ft["geometry"]}
 
 @app.get("/api/v1/parcels/{parcel_id}/climate")
 def parcel_climate(parcel_id: str):
     parsed = parse_id(parcel_id)
     if not parsed:
         raise HTTPException(404, "not a grid cell id")
-    ft = cell_feature(*parsed)
-    lon, lat = ft["properties"]["centroid"]
-    try:
-        climate = climate_for(lat, lon)
-    except Exception as exc:
-        raise HTTPException(502, f"climate archive failed: {exc}") from exc
-    return {"parcel_id": parcel_id, "climate": climate}
+    lon, lat = cell_feature(*parsed)["properties"]["centroid"]
+    return {"parcel_id": parcel_id, "climate": climate_for(lat, lon)}
+
+@app.get("/api/v1/parcels/{parcel_id}/soil")
+def parcel_soil(parcel_id: str):
+    parsed = parse_id(parcel_id)
+    if not parsed:
+        raise HTTPException(404, "not a grid cell id")
+    lon, lat = cell_feature(*parsed)["properties"]["centroid"]
+    key = f"{lat:.4f},{lon:.4f}"
+    if key not in SOIL_CACHE:
+        try:
+            sg = soilgrids(lat, lon)
+        except Exception as exc:
+            sg = {"has_values": False, "source": f"SoilGrids failed: {exc}"}
+        try:
+            climate = climate_for(lat, lon)
+        except Exception:
+            climate = None
+        SOIL_CACHE[key] = {"soil": sg, "notes": soil_notes(sg, climate)}
+    return {"parcel_id": parcel_id, **SOIL_CACHE[key]}
 
 @app.get("/api/v1/geocode")
 def geocode(q: str = Query(min_length=2)):
