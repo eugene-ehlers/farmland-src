@@ -24,7 +24,7 @@ MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec
 CLIMATE_CACHE: dict[str, dict] = {}
 SOIL_CACHE: dict[str, dict] = {}
 
-app = FastAPI(title="Farmland", version="0.9.0")
+app = FastAPI(title="Farmland", version="0.9.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 
 def get_json(url, timeout=40):
@@ -36,8 +36,7 @@ def ix_iy(lon, lat):
     return int(math.floor((lon - ORIGIN_W) / STEP)), int(math.floor((lat - ORIGIN_S) / STEP))
 
 def cell_bounds(ix, iy):
-    w = ORIGIN_W + ix * STEP
-    s = ORIGIN_S + iy * STEP
+    w = ORIGIN_W + ix * STEP; s = ORIGIN_S + iy * STEP
     return w, s, w + STEP, s + STEP
 
 def cell_id(ix, iy):
@@ -45,26 +44,19 @@ def cell_id(ix, iy):
 
 def parse_id(pid: str):
     parts = pid.split(":")
-    if len(parts) != 3 or parts[0] != "g":
-        return None
-    try:
-        return int(parts[1]), int(parts[2])
-    except ValueError:
-        return None
+    if len(parts) != 3 or parts[0] != "g": return None
+    try: return int(parts[1]), int(parts[2])
+    except ValueError: return None
 
 def cell_feature(ix, iy):
     w, s, e, n = cell_bounds(ix, iy)
-    mid_lat = (s + n) / 2.0
-    mid_lon = (w + e) / 2.0
+    mid_lat = (s + n) / 2.0; mid_lon = (w + e) / 2.0
     ha = round(abs((e - w) * 111_320.0 * math.cos(math.radians(mid_lat)) * (n - s) * 110_540.0) / 10_000.0, 2)
     pid = cell_id(ix, iy)
-    return {
-        "type": "Feature",
-        "id": pid,
+    return {"type": "Feature", "id": pid,
         "geometry": {"type": "Polygon", "coordinates": [[[round(w,6),round(s,6)],[round(e,6),round(s,6)],[round(e,6),round(n,6)],[round(w,6),round(n,6)],[round(w,6),round(s,6)]]]},
-        "properties": {"parcel_id": pid, "sg_code": None, "name": f"Analysis cell {pid}",
-            "extent_ha": ha, "kind": "grid", "centroid": [round(mid_lon, 5), round(mid_lat, 5)]},
-    }
+        "properties": {"parcel_id": pid, "name": f"Analysis cell {pid}", "extent_ha": ha, "kind": "grid",
+            "centroid": [round(mid_lon, 5), round(mid_lat, 5)]}}
 
 def _avg(xs):
     xs = [x for x in xs if x is not None]
@@ -72,14 +64,12 @@ def _avg(xs):
 
 def climate_for(lat: float, lon: float) -> dict:
     key = f"{lat:.4f},{lon:.4f}"
-    if key in CLIMATE_CACHE:
-        return CLIMATE_CACHE[key]
+    if key in CLIMATE_CACHE: return CLIMATE_CACHE[key]
     params = {"latitude": f"{lat:.4f}", "longitude": f"{lon:.4f}", "start_date": "2015-01-01", "end_date": "2024-12-31",
         "daily": "temperature_2m_mean,temperature_2m_max,temperature_2m_min,precipitation_sum,relative_humidity_2m_mean,shortwave_radiation_sum",
         "timezone": "Africa/Johannesburg"}
     data = get_json("https://archive-api.open-meteo.com/v1/archive?" + urlencode(params))
-    daily = data.get("daily") or {}
-    times = daily.get("time") or []
+    daily = data.get("daily") or {}; times = daily.get("time") or []
     buckets = {m: {"t": [], "tx": [], "tn": [], "p": [], "h": [], "s": []} for m in range(1, 13)}
     for i, day in enumerate(times):
         m = int(day[5:7]); b = buckets[m]
@@ -156,9 +146,11 @@ def parcel_soil(parcel_id: str):
     return {"parcel_id": parcel_id, **SOIL_CACHE[key]}
 
 @app.get("/api/v1/crops")
-def crops(month: str | None = Query(default=None), regime: str | None = Query(default=None)):
+def crops(month: str | None = Query(default=None), regime: str | None = Query(default=None),
+          annual_mm: float | None = Query(default=None)):
     if month:
-        return {"month": month, "regime": regime, "crops": for_window([month[:3].title()], regime)}
+        return {"month": month, "regime": regime, "annual_mm": annual_mm,
+                "crops": for_window([month[:3].title()], regime, annual_mm)}
     return {"crops": [{"id": k, "name": v["name"], "months": v["months"]} for k, v in CROPS.items()]}
 
 @app.get("/api/v1/crops/{crop_id}")
