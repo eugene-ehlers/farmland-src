@@ -7,30 +7,32 @@ function banner(t){const el=document.getElementById('banner');if(el)el.textConte
 function climateTable(c){
   if(!c||!c.monthly)return '<p>Climate not loaded.</p>';
   const rows=c.monthly.map(m=>`<tr><td>${esc(m.month)}</td><td>${m.rain_mm??'—'}</td><td>${m.rain_chirps_mm??'—'}</td><td>${m.t_mean_c??'—'}</td><td>${m.t_min_c??'—'}/${m.t_max_c??'—'}</td><td>${m.rh_pct??'—'}</td><td>${m.sun_mj_m2??'—'}</td></tr>`).join('');
-  return `<p><strong>ERA5 ${c.annual_rain_mm??'—'} mm</strong> · <strong>CHIRPS ${c.annual_chirps_mm??'—'} mm</strong> · ${c.elevation_m??'—'} m</p>
-    <table class="clim"><thead><tr><th></th><th>ERA5 mm</th><th>CHIRPS mm</th><th>T °C</th><th>Min/max</th><th>RH %</th><th>Sun</th></tr></thead><tbody>${rows}</tbody></table>
-    <p class="foot">${esc(c.source||'')} · ${esc(c.period||'')}</p>`;
+  return `<p><strong>ERA5 ${c.annual_rain_mm??'—'} mm</strong> · CHIRPS ${c.annual_chirps_mm??'—'} mm · ${c.elevation_m??'—'} m</p>
+    <table class="clim"><thead><tr><th></th><th>ERA5</th><th>CHIRPS</th><th>T</th><th>Min/max</th><th>RH</th><th>Sun</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function soilBlock(s, notes){
   if(!s)return '<p>Loading soil…</p>';
-  const nums=s.has_values?`<p>Texture <strong>${esc(s.texture_class||'—')}</strong> · sand ${s.sand_pct??'—'}% · clay ${s.clay_pct??'—'}% · pH ${s.ph_water??'—'}</p>`:
-    '<p>No SoilGrids value here. Climate still drives the year plan.</p>';
-  const lis=(notes||[]).map(n=>`<li>${esc(n)}</li>`).join('');
-  return `${nums}<ul>${lis}</ul>`;
+  const nums=s.has_values?`<p>Texture <strong>${esc(s.texture_class||'—')}</strong> · pH ${s.ph_water??'—'}</p>`:'<p>No SoilGrids value here.</p>';
+  return nums+'<ul>'+(notes||[]).map(n=>`<li>${esc(n)}</li>`).join('')+'</ul>';
 }
 function planBlock(p){
   if(!p)return '';
-  const slots=(p.slots||[]).map(s=>`<li><strong>${esc(s.window)}</strong> (${esc(s.role)}): ${esc((s.examples||[]).join(', '))} — ${esc(s.why)}</li>`).join('');
+  const slots=(p.slots||[]).map(s=>`<li><strong>${esc(s.window)}</strong> (${esc(s.role)}): ${esc((s.examples||[]).join(', '))}</li>`).join('');
   const rot=(p.rotation_idea||[]).map(x=>`<li>${esc(x)}</li>`).join('');
-  return `<p class="meta">${esc(p.rain_regime||'')} · summer ${p.summer_rain_mm??'—'} mm · winter ${p.winter_rain_mm??'—'} mm</p>
-    <p><em>${esc(p.not)}</em></p><ul>${slots}</ul><h4>Rotation idea</h4><ul>${rot}</ul><p class="foot">${esc(p.next||'')}</p>`;
+  return `<p class="meta">${esc(p.rain_regime||'')} · summer ${p.summer_rain_mm??'—'} mm · winter ${p.winter_rain_mm??'—'} mm</p><p><em>${esc(p.not||'')}</em></p><ul>${slots}</ul><ul>${rot}</ul>`;
+}
+function marketBlock(m){
+  if(!m)return '<p>No market list.</p>';
+  const rows=(m.nearest||[]).map(x=>`<li><strong>${esc(x.name)}</strong> · ${x.km} km · ${esc(x.size)}${x.fits_crate_lots?' · closer to crate lots':''}</li>`).join('');
+  return `<ul>${rows}</ul><p class="foot">${esc(m.hint||'')}</p><p class="foot">${esc(m.price_note||'')}</p><p class="foot">${esc(m.logistics_note||'')}</p>`;
 }
 function dossierHtml(p, climate, soil){
   return `<h2>${esc(p.name)}</h2>
     <div class="ha">${p.extent_ha??'—'} ha · ${esc(p.parcel_id)}</div>
     <div class="block"><h3>Climate 2015–2024</h3>${climate?climateTable(climate):'<p>Loading…</p>'}</div>
     <div class="block"><h3>Soil</h3>${soil?soilBlock(soil.soil, soil.notes):'<p>Loading…</p>'}</div>
-    <div class="block"><h3>Year plan (climate-fit, not historic yield)</h3>${soil&&soil.enterprises?planBlock(soil.enterprises):'<p>Loading…</p>'}</div>`;
+    <div class="block"><h3>Year plan</h3>${soil&&soil.enterprises?planBlock(soil.enterprises):'<p>Loading…</p>'}</div>
+    <div class="block"><h3>Nearest markets</h3>${soil&&soil.markets?marketBlock(soil.markets):'<p>Loading…</p>'}</div>`;
 }
 async function openDossier(id){
   const r=await fetch('/api/v1/parcels/'+encodeURIComponent(id));
@@ -39,9 +41,8 @@ async function openDossier(id){
   document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,null,null);
   document.getElementById('dossier').hidden=false;
   let climate=null, soil=null;
-  try{const cr=await fetch('/api/v1/parcels/'+encodeURIComponent(id)+'/climate'); const cj=await cr.json(); climate=cr.ok?cj.climate:null;}catch(e){}
-  document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,climate,soil);
-  try{const sr=await fetch('/api/v1/parcels/'+encodeURIComponent(id)+'/soil'); const sj=await sr.json(); soil=sr.ok?sj:null;}catch(e){}
+  try{const cr=await fetch('/api/v1/parcels/'+encodeURIComponent(id)+'/climate');const cj=await cr.json();climate=cr.ok?cj.climate:null;}catch(e){}
+  try{const sr=await fetch('/api/v1/parcels/'+encodeURIComponent(id)+'/soil');const sj=await sr.json();soil=sr.ok?sj:null;}catch(e){}
   document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,climate,soil);
 }
 document.getElementById('close-dossier').onclick=()=>{document.getElementById('dossier').hidden=true};
@@ -60,7 +61,7 @@ async function loadParcels(){
   } else map.getSource('parcels').setData(fc);
   banner(((fc.features||[]).length)+' cells in view.');
 }
-let t=null; map.on('load',loadParcels); map.on('moveend',()=>{clearTimeout(t);t=setTimeout(loadParcels,350);});
+let t=null;map.on('load',loadParcels);map.on('moveend',()=>{clearTimeout(t);t=setTimeout(loadParcels,350);});
 document.getElementById('search-form').addEventListener('submit',async e=>{
   e.preventDefault();
   const raw=document.getElementById('search').value.trim();if(!raw)return;
