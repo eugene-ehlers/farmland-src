@@ -4,19 +4,33 @@ const map=new maplibregl.Map({container:'map',style:OSM,center:CENTER,zoom:5,max
 map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-left');
 function esc(s){return String(s??'').replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>')}
 function banner(t){const el=document.getElementById('banner');if(el)el.textContent=t;}
-function dossierHtml(p){
+function climateTable(c){
+  if(!c||!c.monthly)return '<p>Climate not loaded.</p>';
+  const rows=c.monthly.map(m=>`<tr><td>${esc(m.month)}</td><td>${m.rain_mm??'—'}</td><td>${m.t_mean_c??'—'}</td><td>${m.t_min_c??'—'}/${m.t_max_c??'—'}</td><td>${m.rh_pct??'—'}</td><td>${m.sun_mj_m2??'—'}</td></tr>`).join('');
+  return `<p><strong>${c.annual_rain_mm??'—'} mm</strong> mean annual rain · ${c.elevation_m??'—'} m elevation</p>
+    <table class="clim"><thead><tr><th></th><th>Rain mm</th><th>T °C</th><th>Min/max</th><th>RH %</th><th>Sun MJ/m²</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="foot">${esc(c.source)} · ${esc(c.period)} · ${esc(c.scale)} · ${esc(c.confidence)}</p>`;
+}
+function dossierHtml(p, climate){
   return `<h2>${esc(p.name)}</h2>
     <div class="ha">${p.extent_ha??'—'} ha · ${esc(p.parcel_id)}</div>
-    <div class="meta">sg_code: null · ~1 ha analysis cell, not a cadastre diagram</div>
-    <div class="block"><h3>Grain</h3><p>One row is about one hectare. A small allocated farm is a group of these ids.</p><p class="foot">${esc(p.source||'')}</p></div>
-    <div class="block"><h3>Not on this row yet</h3><p>Historic weather, soil / land type, enterprise calendar, markets.</p></div>`;
+    <div class="meta">smallholding tile · not a cadastre diagram</div>
+    <div class="block"><h3>Climate 2015–2024</h3>${climate?climateTable(climate):'<p>Loading historic weather…</p>'}</div>
+    <div class="block"><h3>Not on this row yet</h3><p>Soil / land type, enterprise calendar, markets.</p></div>`;
 }
 async function openDossier(id){
   const r=await fetch('/api/v1/parcels/'+encodeURIComponent(id));
   if(!r.ok)return;
   const body=await r.json();
-  document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel);
+  document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,null);
   document.getElementById('dossier').hidden=false;
+  try{
+    const cr=await fetch('/api/v1/parcels/'+encodeURIComponent(id)+'/climate');
+    const cj=await cr.json();
+    document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel, cr.ok?cj.climate:{monthly:null});
+  }catch(e){
+    document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,{monthly:null});
+  }
 }
 document.getElementById('close-dossier').onclick=()=>{document.getElementById('dossier').hidden=true};
 async function loadParcels(){
