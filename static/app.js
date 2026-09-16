@@ -7,30 +7,42 @@ function banner(t){const el=document.getElementById('banner');if(el)el.textConte
 function climateTable(c){
   if(!c||!c.monthly)return '<p>Climate not loaded.</p>';
   const rows=c.monthly.map(m=>`<tr><td>${esc(m.month)}</td><td>${m.rain_mm??'—'}</td><td>${m.rain_chirps_mm??'—'}</td><td>${m.t_mean_c??'—'}</td><td>${m.t_min_c??'—'}/${m.t_max_c??'—'}</td><td>${m.rh_pct??'—'}</td><td>${m.sun_mj_m2??'—'}</td></tr>`).join('');
-  return `<p><strong>ERA5 ${c.annual_rain_mm??'—'} mm</strong> · <strong>CHIRPS ${c.annual_chirps_mm??'—'} mm</strong> mean annual rain · ${c.elevation_m??'—'} m</p>
+  return `<p><strong>ERA5 ${c.annual_rain_mm??'—'} mm</strong> · <strong>CHIRPS ${c.annual_chirps_mm??'—'} mm</strong> · ${c.elevation_m??'—'} m</p>
     <table class="clim"><thead><tr><th></th><th>ERA5 mm</th><th>CHIRPS mm</th><th>T °C</th><th>Min/max</th><th>RH %</th><th>Sun</th></tr></thead><tbody>${rows}</tbody></table>
-    <p class="foot">${esc(c.source)} · ${esc(c.chirps_source||'CHIRPS v2 ~5 km')} · ${esc(c.period)}</p>`;
+    <p class="foot">${esc(c.source)} · ${esc(c.chirps_source||'')} · ${esc(c.period)}</p>`;
 }
-function dossierHtml(p, climate){
+function soilBlock(s, notes){
+  if(!s)return '<p>Loading soil…</p>';
+  const nums=s.has_values?`<p>Texture <strong>${esc(s.texture_class||'—')}</strong> · sand ${s.sand_pct??'—'}% · clay ${s.clay_pct??'—'}% · pH ${s.ph_water??'—'} · C ${s.soc_g_kg??'—'} g/kg · CEC ${s.cec_cmol_kg??'—'}</p>`:
+    '<p>SoilGrids has no predicted value at this coordinate (common in parts of South Africa on the public point API). Climate notes below still apply. Next step is a lab sample on this plot.</p>';
+  const lis=(notes||[]).map(n=>`<li>${esc(n)}</li>`).join('');
+  return `${nums}<ul>${lis}</ul><p class="foot">${esc(s.source||'')}</p>`;
+}
+function dossierHtml(p, climate, soil){
   return `<h2>${esc(p.name)}</h2>
     <div class="ha">${p.extent_ha??'—'} ha · ${esc(p.parcel_id)}</div>
     <div class="meta">smallholding tile · not a cadastre diagram</div>
     <div class="block"><h3>Climate 2015–2024</h3>${climate?climateTable(climate):'<p>Loading historic weather…</p>'}</div>
-    <div class="block"><h3>Not on this row yet</h3><p>Soil / land type, enterprise calendar, markets. SAWS/ARC station overlay needs a licence.</p></div>`;
+    <div class="block"><h3>Soil and what it suggests</h3>${soil?soilBlock(soil.soil, soil.notes):'<p>Loading soil…</p>'}</div>`;
 }
 async function openDossier(id){
   const r=await fetch('/api/v1/parcels/'+encodeURIComponent(id));
   if(!r.ok)return;
   const body=await r.json();
-  document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,null);
+  document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,null,null);
   document.getElementById('dossier').hidden=false;
+  let climate=null;
   try{
     const cr=await fetch('/api/v1/parcels/'+encodeURIComponent(id)+'/climate');
     const cj=await cr.json();
-    document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel, cr.ok?cj.climate:{monthly:null});
-  }catch(e){
-    document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,{monthly:null});
-  }
+    climate=cr.ok?cj.climate:null;
+    document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,climate,null);
+  }catch(e){}
+  try{
+    const sr=await fetch('/api/v1/parcels/'+encodeURIComponent(id)+'/soil');
+    const sj=await sr.json();
+    document.getElementById('dossier-body').innerHTML=dossierHtml(body.parcel,climate, sr.ok?sj:null);
+  }catch(e){}
 }
 document.getElementById('close-dossier').onclick=()=>{document.getElementById('dossier').hidden=true};
 async function loadParcels(){
