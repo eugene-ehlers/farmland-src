@@ -1,4 +1,4 @@
-"""Indicative enterprises from climate + soil. Not a record of what was grown on this plot."""
+"""Indicative enterprises from climate + soil. Not plot yields."""
 from __future__ import annotations
 
 SUMMER = ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
@@ -16,45 +16,60 @@ def year_plan(climate: dict | None, soil: dict | None) -> dict:
     winter = _rain(climate, WINTER)
     monthly = climate.get("monthly") or []
     frost = [m["month"] for m in monthly if (m.get("t_min_c") or 99) < 3]
-    warm = [m["month"] for m in monthly if (m.get("t_mean_c") or 0) >= 18]
     tex = soil.get("texture_class")
     ph = soil.get("ph_water")
-    regime = "summer-rain" if summer >= winter * 1.3 else ("winter-rain" if winter >= summer * 1.1 else "mixed")
 
-    slots = []
-    if regime == "winter-rain":
-        slots.append({"window": "Apr–Oct", "role": "main", "examples": ["wheat", "barley", "canola", "oats"], "why": "Winter-rain pattern in the 10-year climate."})
-        slots.append({"window": "Nov–Mar", "role": "cover / veg", "examples": ["cover mix", "cowpeas if irrigated", "leaf vegetables if water"], "why": "Dry summer in this climate unless you irrigate."})
+    if annual is not None and annual < 400:
+        regime = "arid"
+    elif summer >= winter * 1.3 and (annual or 0) >= 400:
+        regime = "summer-rain"
+    elif winter >= summer * 1.1:
+        regime = "winter-rain"
     else:
-        slots.append({"window": "Oct–Mar", "role": "main", "examples": ["maize", "sorghum", "dry beans", "cowpeas", "groundnuts", "sunflower"], "why": "Summer-rain pattern. Beans/cowpeas in the rotation fix nitrogen."})
-        slots.append({"window": "Apr–Aug", "role": "cover / rest / winter veg", "examples": ["grazing vetch", "oats forage", "fallow with cover", "cabbage/spinach if frost and water allow"], "why": "Dry, cooler months. Rest or a cover stops the soil going bare."})
+        regime = "mixed"
 
-    if annual is not None and annual < 450:
-        slots[0]["examples"] = ["sorghum", "cowpeas", "millet", "drought vegetables under irrigation"]
-        slots[0]["why"] += " Annual rain is low for dryland maize."
+    if regime == "arid":
+        slots = [
+            {"window": "Any month", "role": "main", "examples": ["drought vegetables under irrigation", "sorghum if a wet spell", "small stock / fodder"],
+             "why": f"About {annual:.0f} mm a year. That is not a dryland maize climate. Water or a very hardy crop."},
+            {"window": "Year-round", "role": "cover", "examples": ["do not leave soil bare", "mulch", "light cover if it germinates"],
+             "why": "Low, even rain. A bare plot blows and bakes."},
+        ]
+        rotation = [
+            "Do not plan dryland maize on this rainfall.",
+            "If you have water: short vegetables in the cooler months, sorghum or cowpeas only if a wet window arrives.",
+            "If you do not have water: fodder / small stock / rest with cover — this is not a grain hectare.",
+        ]
+    elif regime == "winter-rain":
+        slots = [
+            {"window": "Apr–Oct", "role": "main", "examples": ["wheat", "barley", "canola", "oats"], "why": "Winter-rain pattern."},
+            {"window": "Nov–Mar", "role": "cover / veg", "examples": ["cover", "irrigated vegetables"], "why": "Dry summer unless you irrigate."},
+        ]
+        rotation = ["Winter cereal", "Summer cover or irrigated veg", "Do not leave the plot bare"]
+    else:
+        slots = [
+            {"window": "Oct–Mar", "role": "main", "examples": ["maize", "sorghum", "dry beans", "cowpeas", "sunflower"], "why": "Summer-rain pattern."},
+            {"window": "Apr–Aug", "role": "cover", "examples": ["legume cover", "oats forage", "cabbage if frost and water allow"], "why": "Cooler, drier months."},
+        ]
+        rotation = ["Summer cereal", "Winter legume cover", "Summer beans or vegetables", "Winter rest or cover"]
+        if annual is not None and annual < 550:
+            slots[0]["examples"] = ["sorghum", "cowpeas", "sunflower", "beans if the season starts wet"]
+            slots[0]["why"] = "Summer rain, but the annual total is tight for dryland maize."
+            rotation[0] = "Summer sorghum or cowpeas — maize only if you irrigate or the season is clearly wet"
+
+    if ph is not None and ph >= 7.5:
+        slots.append({"window": "soil", "role": "caution", "examples": ["watch zinc and iron", "lab sample before fertiliser"], "why": "Predicted pH is alkaline."})
     if tex in ("sandy", "sandy loam"):
-        slots.append({"window": "any irrigated slot", "role": "caution", "examples": ["smaller irrigation doses", "mulch"], "why": "Light soil does not hold a big watering."})
-    if tex in ("clay", "clay loam"):
-        slots.append({"window": "wet months", "role": "caution", "examples": ["avoid working wet clay", "ridge vegetables"], "why": "Heavy soil waterlogs easily."})
-    if ph is not None and ph < 5.5:
-        slots.append({"window": "before cash crop", "role": "soil", "examples": ["lab test + lime if the test says so", "beans after a cereal"], "why": "Predicted pH is acid. Do not guess a lime bag from the map."})
+        slots.append({"window": "irrigation", "role": "caution", "examples": ["small frequent waterings", "mulch"], "why": "Light soil does not store a big watering."})
 
-    rotation = [
-        "Year A summer: cereal (maize or sorghum) if rain allows",
-        "Year A winter / cover: legume cover or forage",
-        "Year B summer: legume cash (beans, cowpeas) or mixed vegetables",
-        "Year B winter: rest or light cover — do not leave the plot bare",
-    ]
     return {
         "kind": "climate_fit",
-        "not": "Historic crop success on this hectare. We do not have plot yields.",
+        "disclaimer": "Not historic yield on this hectare. Pattern from 2015–2024 climate only.",
         "rain_regime": regime,
         "annual_rain_mm": annual,
         "summer_rain_mm": round(summer, 0),
         "winter_rain_mm": round(winter, 0),
-        "warm_months": warm,
         "frost_risk_months": frost,
         "slots": slots,
         "rotation_idea": rotation,
-        "next": "Store what this farmer actually plants and harvests on these cell ids. That becomes the real success record.",
     }
